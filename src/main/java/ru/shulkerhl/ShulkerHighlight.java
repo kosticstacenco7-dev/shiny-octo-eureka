@@ -104,9 +104,9 @@ public final class ShulkerHighlight {
 
     // ==================================================================
     static final class Keys {
-        static final KeyMapping MENU = new KeyMapping(
+                static final KeyMapping MENU = new KeyMapping(
                 "key.shulkerhighlight.menu", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_H, "key.categories.shulkerhighlight");
+                GLFW.GLFW_KEY_H, KeyMapping.Category.MISC);
 
         static void poll(Minecraft mc) {
             boolean free = mc.screen == null;
@@ -277,7 +277,7 @@ public final class ShulkerHighlight {
             if (type == null) return;
 
             Camera camera = mc.gameRenderer.getMainCamera();
-            Vec3 cam = camera.getPosition();
+            Vec3 cam = camera.position();
             double r2 = (double) c.range * c.range;
 
             MultiBufferSource.BufferSource buf = mc.renderBuffers().bufferSource();
@@ -366,15 +366,15 @@ public final class ShulkerHighlight {
             addRenderableWidget(bool(x1, yL, "enabled", c.enabled, v -> c.enabled = v)); yL += RH;
 
             addRenderableWidget(CycleButton.builder((Cfg.Mode m) ->
-                    Component.translatable("shulkerhighlight.mode." + m.name().toLowerCase()))
+                    Component.translatable("shulkerhighlight.mode." + m.name().toLowerCase()), c.mode)
                     .withValues(List.of(Cfg.Mode.values()))
-                    .create(x1, yL, CW, 20, tr("mode"), c.mode,
+                    .create(x1, yL, CW, 20, tr("mode"),
                             (b, v) -> { c.mode = v; Cfg.save(); })); yL += RH;
 
             addRenderableWidget(CycleButton.builder((Cfg.Src s) ->
-                    Component.translatable("shulkerhighlight.source." + s.name().toLowerCase()))
+                    Component.translatable("shulkerhighlight.source." + s.name().toLowerCase()), c.colorSource)
                     .withValues(List.of(Cfg.Src.values()))
-                    .create(x1, yL, CW, 20, tr("colorSource"), c.colorSource,
+                    .create(x1, yL, CW, 20, tr("colorSource"),
                             (b, v) -> { c.colorSource = v; Cfg.save(); })); yL += RH;
 
             addRenderableWidget(sl(x1, yL, "r", 0, 255, (c.customRgb>>16)&255,
@@ -400,8 +400,8 @@ public final class ShulkerHighlight {
         }
 
         CycleButton<Boolean> bool(int x, int y, String k, boolean v, Consumer<Boolean> set) {
-            return CycleButton.booleanBuilder(CommonComponents.OPTION_ON, CommonComponents.OPTION_OFF)
-                    .create(x, y, CW, 20, tr(k), v, (b, nv) -> { set.accept(nv); Cfg.save(); });
+            return CycleButton.booleanBuilder(CommonComponents.OPTION_ON, CommonComponents.OPTION_OFF, v)
+                    .create(x, y, CW, 20, tr(k), (b, nv) -> { set.accept(nv); Cfg.save(); });
         }
 
         AbstractSliderButton sl(int x, int y, String k, int min, int max, int cur, IntConsumer set) {
