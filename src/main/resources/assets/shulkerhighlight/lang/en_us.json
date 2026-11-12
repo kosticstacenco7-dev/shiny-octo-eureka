@@ -1,0 +1,23 @@
+{
+  "key.categories.shulkerhighlight": "Shulker Highlight",
+  "key.shulkerhighlight.menu": "Меню подсветки шалкеров",
+  "shulkerhighlight.screen.title": "Подсветка шалкеров",
+  "shulkerhighlight.opt.enabled": "Подсветка",
+  "shulkerhighlight.opt.mode": "Режим",
+  "shulkerhighlight.opt.colorSource": "Цвет",
+  "shulkerhighlight.opt.r": "Красный",
+  "shulkerhighlight.opt.g": "Зелёный",
+  "shulkerhighlight.opt.b": "Синий",
+  "shulkerhighlight.opt.fillAlpha": "Заливка",
+  "shulkerhighlight.opt.outlineAlpha": "Контур",
+  "shulkerhighlight.opt.lineWidth": "Толщина",
+  "shulkerhighlight.opt.range": "Дистанция",
+  "shulkerhighlight.opt.throughWalls": "Сквозь стены",
+  "shulkerhighlight.opt.sneakOnly": "Только на Shift",
+  "shulkerhighlight.opt.reset": "Сбросить",
+  "shulkerhighlight.mode.outline": "Контур",
+  "shulkerhighlight.mode.fill": "Заливка",
+  "shulkerhighlight.mode.both": "Контур + заливка",
+  "shulkerhighlight.source.shulker": "Цвет шалкера",
+  "shulkerhighlight.source.custom": "Свой цвет"
+}
