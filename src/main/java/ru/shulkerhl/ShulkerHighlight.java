@@ -2,12 +2,14 @@ package ru.shulkerhl;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.mojang.blaze3d.framegraph.FramePass;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.platform.DepthTestFunction;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Camera;
+import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -16,13 +18,16 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.LevelTargetBundle;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderPipelines;
-import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderSetup;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.state.LevelRenderState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.ChunkPos;
@@ -31,8 +36,9 @@ import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.FramePassManager;
+import net.minecraftforge.client.event.AddFramePassEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
-import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.eventbus.api.listener.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
@@ -56,13 +62,18 @@ public final class ShulkerHighlight {
     public ShulkerHighlight(FMLJavaModLoadingContext context) {
         var modBusGroup = context.getModBusGroup();
         FMLClientSetupEvent.getBus(modBusGroup).addListener(ShulkerHighlight::onClientSetup);
+        AddFramePassEvent.BUS.addListener(ShulkerHighlight::onAddFramePass);
     }
 
     private static void onClientSetup(FMLClientSetupEvent event) {
         event.enqueueWork(() -> { Cfg.load(); RT.init(); });
     }
 
-    // ---------- регистрация клавиши (mod bus) ----------
+    private static void onAddFramePass(AddFramePassEvent event) {
+        event.addPass(Identifier.fromNamespaceAndPath(MODID, "highlight"), new HighlightPass());
+    }
+
+    // ---------- регистрация клавиши ----------
     @Mod.EventBusSubscriber(modid = MODID, value = Dist.CLIENT)
     public static final class ModEvents {
         @SubscribeEvent
@@ -71,17 +82,23 @@ public final class ShulkerHighlight {
         }
     }
 
-    // ---------- игровой рендер (game bus) ----------
-    @Mod.EventBusSubscriber(modid = MODID, value = Dist.CLIENT)
-    public static final class GameEvents {
-        @SubscribeEvent
-        public static void onRenderLevel(RenderLevelStageEvent event) {
-            if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_LEVEL) return;
+    // ---------- проход рендера (замена RenderLevelStageEvent) ----------
+    static final class HighlightPass implements FramePassManager.PassDefinition {
+
+        @Override
+        public void extracts(LevelTargetBundle bundle, FramePass pass, DeltaTracker delta) {
+            // обязательная привязка хотя бы к одному таргету, иначе упадёт resolvePassOrder
+            bundle.main = pass.readsAndWrites(bundle.main);
+
             Minecraft mc = Minecraft.getInstance();
             if (mc.level == null || mc.player == null) return;
             Keys.poll(mc);
             Scan.tick(mc.level);
-            Draw.render(event.getPoseStack(), event.getCamera());
+        }
+
+        @Override
+        public void executes(LevelRenderState state) {
+            Draw.render();
         }
     }
 
@@ -147,7 +164,7 @@ public final class ShulkerHighlight {
     }
 
     // ==================================================================
-    //  ЦВЕТА
+    //  ЦВЕТА КРАСИТЕЛЕЙ
     // ==================================================================
     static final Map<DyeColor, Integer> DYE = new EnumMap<>(DyeColor.class);
     static final int UNDYED = 0x9A6A9A;
@@ -163,10 +180,11 @@ public final class ShulkerHighlight {
     }
 
     // ==================================================================
-    //  ПОИСК ШАЛКЕРОВ
+    //  ПОИСК ПОСТАВЛЕННЫХ ШАЛКЕРОВ
     // ==================================================================
     static final class Scan {
         record Target(BlockPos pos, int rgb) {}
+
         private static final List<Target> LIST = new ArrayList<>();
         private static long lastMs = 0;
         private static ChunkPos lastChunk;
@@ -176,6 +194,7 @@ public final class ShulkerHighlight {
         static void tick(ClientLevel level) {
             Cfg c = Cfg.get();
             if (!c.enabled) { LIST.clear(); return; }
+
             Minecraft mc = Minecraft.getInstance();
             BlockPos o = mc.player.blockPosition();
             ChunkPos cur = new ChunkPos(o);
@@ -186,6 +205,7 @@ public final class ShulkerHighlight {
             int r = c.range, r2 = r * r;
             List<Target> out = new ArrayList<>();
             var src = level.getChunkSource();
+
             for (int cx = (o.getX() - r) >> 4; cx <= (o.getX() + r) >> 4; cx++)
                 for (int cz = (o.getZ() - r) >> 4; cz <= (o.getZ() + r) >> 4; cz++) {
                     LevelChunk ch = src.getChunkNow(cx, cz);
@@ -204,49 +224,67 @@ public final class ShulkerHighlight {
     }
 
     // ==================================================================
-    //  RENDER TYPE (X-Ray)
+    //  ТИПЫ РЕНДЕРА — оба свои, RenderTypes не используется
     // ==================================================================
     static final class RT {
         private static RenderType xray;
+        private static RenderType normal;
 
         static void init() {
+            xray   = make("xray_box",   DepthTestFunction.NO_DEPTH_TEST);
+            normal = make("normal_box", DepthTestFunction.LEQUAL_DEPTH_TEST);
+        }
+
+        private static RenderType make(String name, DepthTestFunction depth) {
             try {
-                RenderPipeline pipe = RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
-                        .withLocation(ResourceLocation.fromNamespaceAndPath(MODID, "xray_box"))
-                        .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+                RenderPipeline pipe = RenderPipeline
+                        .builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
+                        .withLocation(Identifier.fromNamespaceAndPath(MODID, name))
+                        .withDepthTestFunction(depth)
                         .withDepthWrite(false)
                         .withCull(true)
                         .build();
-                xray = RenderType.create(MODID + "_xray_box", 1536, false, true, pipe,
-                        RenderType.CompositeState.builder().createCompositeState(false));
+
+                RenderSetup setup = RenderSetup.builder(pipe)
+                        .bufferSize(1536)
+                        .createRenderSetup();
+
+                return RenderType.create(MODID + ":" + name, setup);
             } catch (Throwable t) {
-                System.err.println("[ShulkerHighlight] X-Ray пайплайн не создан, откат: " + t);
-                xray = null;
+                System.err.println("[ShulkerHighlight] Не создан тип " + name + ": " + t);
+                return null;
             }
         }
 
-        static RenderType xray() { return xray != null ? xray : RenderType.debugFilledBox(); }
-        static RenderType normal() { return RenderType.debugFilledBox(); }
+        static RenderType get(boolean throughWalls) {
+            if (throughWalls && xray != null) return xray;
+            return normal;
+        }
     }
 
     // ==================================================================
     //  ОТРИСОВКА
     // ==================================================================
     static final class Draw {
-        static void render(PoseStack pose, Camera camera) {
+        static void render() {
             Cfg c = Cfg.get();
             Minecraft mc = Minecraft.getInstance();
             if (!c.enabled || mc.player == null || mc.level == null) return;
             if (c.sneakOnly && !mc.player.isShiftKeyDown()) return;
             if (Scan.list().isEmpty()) return;
 
+            RenderType type = RT.get(c.throughWalls);
+            if (type == null) return;
+
+            Camera camera = mc.gameRenderer.getMainCamera();
             Vec3 cam = camera.getPosition();
             double r2 = (double) c.range * c.range;
-            RenderType type = c.throughWalls ? RT.xray() : RT.normal();
+
             MultiBufferSource.BufferSource buf = mc.renderBuffers().bufferSource();
             VertexConsumer vc = buf.getBuffer(type);
             float fa = c.fillAlpha / 100f, la = c.outlineAlpha / 100f;
 
+            PoseStack pose = new PoseStack();
             pose.pushPose();
             pose.translate(-cam.x, -cam.y, -cam.z);
 
@@ -254,6 +292,7 @@ public final class ShulkerHighlight {
                 BlockPos p = t.pos();
                 double d2 = cam.distanceToSqr(p.getX() + .5, p.getY() + .5, p.getZ() + .5);
                 if (d2 > r2) continue;
+
                 int rgb = c.colorSource == Cfg.Src.CUSTOM ? c.customRgb : t.rgb();
                 float r = ((rgb >> 16) & 255) / 255f;
                 float g = ((rgb >> 8) & 255) / 255f;
@@ -265,11 +304,13 @@ public final class ShulkerHighlight {
 
                 if (c.mode != Cfg.Mode.OUTLINE && fa > .001f)
                     box(pose, vc, x0, y0, z0, x1, y1, z1, r, g, b, fa);
+
                 if (c.mode != Cfg.Mode.FILL && la > .001f) {
                     double th = Mth.clamp(c.lineWidth * .0022 * Math.sqrt(d2), .006, .25);
                     outline(pose, vc, x0, y0, z0, x1, y1, z1, th, r, g, b, la);
                 }
             }
+
             pose.popPose();
             buf.endBatch(type);
         }
@@ -323,17 +364,25 @@ public final class ShulkerHighlight {
             int x1 = lx + 8, x2 = lx + W - 8 - CW, yL = ty + 24, yR = ty + 24;
 
             addRenderableWidget(bool(x1, yL, "enabled", c.enabled, v -> c.enabled = v)); yL += RH;
+
             addRenderableWidget(CycleButton.builder((Cfg.Mode m) ->
                     Component.translatable("shulkerhighlight.mode." + m.name().toLowerCase()))
-                    .withValues(List.of(Cfg.Mode.values())).withInitialValue(c.mode)
-                    .create(x1, yL, CW, 20, tr("mode"), (b,v) -> { c.mode = v; Cfg.save(); })); yL += RH;
+                    .withValues(List.of(Cfg.Mode.values()))
+                    .create(x1, yL, CW, 20, tr("mode"), c.mode,
+                            (b, v) -> { c.mode = v; Cfg.save(); })); yL += RH;
+
             addRenderableWidget(CycleButton.builder((Cfg.Src s) ->
                     Component.translatable("shulkerhighlight.source." + s.name().toLowerCase()))
-                    .withValues(List.of(Cfg.Src.values())).withInitialValue(c.colorSource)
-                    .create(x1, yL, CW, 20, tr("colorSource"), (b,v) -> { c.colorSource = v; Cfg.save(); })); yL += RH;
-            addRenderableWidget(sl(x1, yL, "r", 0, 255, (c.customRgb>>16)&255, v -> c.customRgb = (c.customRgb & 0x00FFFF) | (v<<16))); yL += RH;
-            addRenderableWidget(sl(x1, yL, "g", 0, 255, (c.customRgb>>8)&255,  v -> c.customRgb = (c.customRgb & 0xFF00FF) | (v<<8)));  yL += RH;
-            addRenderableWidget(sl(x1, yL, "b", 0, 255, c.customRgb&255,       v -> c.customRgb = (c.customRgb & 0xFFFF00) | v));
+                    .withValues(List.of(Cfg.Src.values()))
+                    .create(x1, yL, CW, 20, tr("colorSource"), c.colorSource,
+                            (b, v) -> { c.colorSource = v; Cfg.save(); })); yL += RH;
+
+            addRenderableWidget(sl(x1, yL, "r", 0, 255, (c.customRgb>>16)&255,
+                    v -> c.customRgb = (c.customRgb & 0x00FFFF) | (v<<16))); yL += RH;
+            addRenderableWidget(sl(x1, yL, "g", 0, 255, (c.customRgb>>8)&255,
+                    v -> c.customRgb = (c.customRgb & 0xFF00FF) | (v<<8))); yL += RH;
+            addRenderableWidget(sl(x1, yL, "b", 0, 255, c.customRgb&255,
+                    v -> c.customRgb = (c.customRgb & 0xFFFF00) | v));
 
             addRenderableWidget(sl(x2, yR, "fillAlpha", 0, 100, c.fillAlpha, v -> c.fillAlpha = v)); yR += RH;
             addRenderableWidget(sl(x2, yR, "outlineAlpha", 0, 100, c.outlineAlpha, v -> c.outlineAlpha = v)); yR += RH;
@@ -343,7 +392,8 @@ public final class ShulkerHighlight {
             addRenderableWidget(bool(x2, yR, "sneakOnly", c.sneakOnly, v -> c.sneakOnly = v));
 
             int by = ty + H - 28;
-            addRenderableWidget(Button.builder(tr("reset"), b -> { Cfg.reset(); minecraft.setScreen(new Menu()); })
+            addRenderableWidget(Button.builder(tr("reset"),
+                    b -> { Cfg.reset(); minecraft.setScreen(new Menu()); })
                     .bounds(lx + 8, by, 100, 20).build());
             addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, b -> onClose())
                     .bounds(lx + W - 108, by, 100, 20).build());
@@ -351,8 +401,7 @@ public final class ShulkerHighlight {
 
         CycleButton<Boolean> bool(int x, int y, String k, boolean v, Consumer<Boolean> set) {
             return CycleButton.booleanBuilder(CommonComponents.OPTION_ON, CommonComponents.OPTION_OFF)
-                    .withInitialValue(v).create(x, y, CW, 20, tr(k),
-                            (b, nv) -> { set.accept(nv); Cfg.save(); });
+                    .create(x, y, CW, 20, tr(k), v, (b, nv) -> { set.accept(nv); Cfg.save(); });
         }
 
         AbstractSliderButton sl(int x, int y, String k, int min, int max, int cur, IntConsumer set) {
